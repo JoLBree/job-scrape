@@ -46,7 +46,7 @@ For local development with the AWS integrations, the entry script is `lambda_fun
 
 The dynamic pulling is convoluted, but is concretely useful so that:
 1) The company config and scrapers can be modified without having to repackage the docker container and redeploy the lambda
-2) You can host and run the lambda for non-software-engineer friends who might be down for some Python-writing and HTML. They can self-manage their configuration by uploading files to s3 via the GUI, and not have to deal with docker or anything else AWS. You'll want to restrict their permissions and really warn them about cloud services.
+2) You can host and run the lambda for non-software-engineer friends who might be down for some Python-writing and HTML. They can self-manage their configuration by uploading files to s3 via the GUI, and not have to deal with git, docker or anything else AWS. You'll want to restrict their permissions and really warn them about cloud services.
 
 `lambda_function.py` can be run locally to develop the AWS integrations. However, note that a local run of `lambda_function.py` will still pull the `config.py` and `scrapers.py` files from s3 and __will not__ use your local repo copies.
 
