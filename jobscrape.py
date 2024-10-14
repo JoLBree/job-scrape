@@ -7,6 +7,7 @@ import json
 import os
 import time
 from collections import defaultdict
+from dataclasses import asdict
 from tempfile import mkdtemp
 
 from selenium import webdriver
@@ -16,16 +17,15 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from models import *
 
-def get_new_relevant_jobs(driver, existing_relevant_jobs: dict[str, list[str]], limit_company = None, additional_search_term = None):
-
-    existing_relevant_jobs = defaultdict(set, {key: set(value) for key, value in existing_relevant_jobs.items()})
+def get_new_relevant_jobs(driver, run_record: RunRecord, limit_company = None, additional_search_term = None):
+    existing_jobs = defaultdict(set, {key: set(value) for key, value in run_record.existing_jobs.items()})
 
     relevant_jobs, skipped_companies, verify_no_jobs, errors = get_relevant_jobs(driver, limit_company, additional_search_term)
     new_relevant_jobs = {}
 
     # Group jobs by company, and update existing
     for company, job in relevant_jobs:
-        if job.id not in existing_relevant_jobs[company.name]:
+        if job.id not in existing_jobs[company.name]:
             if company.name in new_relevant_jobs:
                 new_relevant_jobs[company.name]["jobs"].append(job)
             else:
@@ -34,11 +34,28 @@ def get_new_relevant_jobs(driver, existing_relevant_jobs: dict[str, list[str]], 
                     "jobs": [job]
                 }
 
-            existing_relevant_jobs[company.name].add(job.id)
+            existing_jobs[company.name].add(job.id)
 
-    existing_relevant_jobs = {key: sorted(list(value)) for key, value in existing_relevant_jobs.items()}
+    existing_jobs = {key: sorted(list(value)) for key, value in existing_jobs.items()}
 
-    return new_relevant_jobs, existing_relevant_jobs, verify_no_jobs, errors
+
+    # Annotate if errors are new, and create new run record
+    prior_run_errors_company_names = {error.company_name for error in run_record.errors}
+    scrape_errors = []
+    
+    if len(errors) > 0:
+        for company_name, error in errors:
+            scrape_error = ScrapeError(
+                company_name=company_name,
+                message= str(error),
+            )
+            if company_name not in prior_run_errors_company_names:
+                scrape_error.is_new_this_run = True
+            scrape_errors.append(scrape_error)
+
+    run_record = RunRecord(existing_jobs, scrape_errors)            
+
+    return new_relevant_jobs, run_record, verify_no_jobs
 
 def get_relevant_jobs(driver, limit_company, additional_search_term):
     relevant_jobs: list[tuple[Company, list[JobPosting]]] = []
@@ -124,28 +141,32 @@ def format_new_jobs_message(new_jobs: dict[str, dict[str, any]]) -> str:
                 message += f"\t {job.title.replace("\n", " ")} {job.link if job.link else ""}\n"
     return message
 
+def format_errors_message(errors: list[ScrapeError]) -> str:
+    if len(errors) > 0:
+        return "Errors:\n" + "\n".join([f"{"NEW ERROR " if error.is_new_this_run else ""}{error.company_name}: {error.message}" for error in errors])
+    return "No errors."
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Scrape new jobs.')
-    parser.add_argument('existing_jobs_json', type=str, help='path to file with existing jobs')
+    parser.add_argument('run_record_json', type=str, help='Path to file storing history of prior run(s)')
     parser.add_argument('--additional_search_term', type=str, default=None, help='Search term to add in considering a job relevant')
     parser.add_argument('--limit_company', type=str, default=None, help='Search only companies that contain this string in their name')
-    parser.add_argument('--dont_replace_existing', action='store_true', help="Don't replace the existing jobs file")
-    parser.add_argument('--dont_write_existing', action='store_true', help="Don't write the existing jobs file")
+    parser.add_argument('--dont_replace_run_record', action='store_true', help="Don't replace the run record file")
+    parser.add_argument('--dont_write_run_record', action='store_true', help="Don't write the run record file")
     parser.add_argument('--headless', action='store_true', help="Run headless")
     args = parser.parse_args()
 
-    existing_relevant_jobs = {}
-    with open(args.existing_jobs_json) as f:
-        existing_relevant_jobs = json.load(f)
+    with open(args.run_record_json) as f:
+        run_record = RunRecord.from_dict(json.load(f))
 
     options = webdriver.ChromeOptions()
     if args.headless:
         options.add_argument("--headless=new")
     driver = webdriver.Chrome(options=options)
 
-    new_relevant_jobs, existing_relevant_jobs, verify_no_jobs, errors = get_new_relevant_jobs(
+    new_relevant_jobs, run_record, verify_no_jobs = get_new_relevant_jobs(
         driver, 
-        existing_relevant_jobs,
+        run_record,
         args.limit_company,
         args.additional_search_term
     )
@@ -154,16 +175,16 @@ if __name__ == "__main__":
         print(bcolors.OKBLUE + "No jobs at all, but no specific no jobs phrase:\n" + "\n".join([company.name for company in verify_no_jobs]) + bcolors.ENDC)
     if len(new_relevant_jobs) > 0:
         print(bcolors.OKGREEN + format_new_jobs_message(new_relevant_jobs) + bcolors.ENDC)
-    if len(errors) > 0:
-        print(bcolors.FAIL + "Errors:\n" + "\n".join([f"{company_name}: {error}" for company_name, error in errors]) + bcolors.ENDC)
+    if len(run_record.errors) > 0:
+        print(bcolors.FAIL + format_errors_message(run_record.errors) + bcolors.ENDC)
     if len(new_relevant_jobs) == 0:
         print("No new jobs")
 
-    if len(new_relevant_jobs) > 0 and not args.dont_write_existing: # disconnected logic not tied with a hard constraint
-        filename = args.existing_jobs_json
-        if args.dont_replace_existing:
+    if len(new_relevant_jobs) > 0 and not args.dont_write_run_record: # disconnected logic not tied with a hard constraint
+        filename = args.run_record_json
+        if args.dont_replace_run_record:
             path, extension = os.path.splitext(filename)
             filename = f"{path}_{str(datetime.datetime.now()).replace(" ", "_")}{extension}"
         with open(filename, 'w') as f:
-            json.dump(existing_relevant_jobs, f, indent=4)
+            json.dump(asdict(run_record), f, indent=4)
         print(f"Wrote new existing jobs to {filename}")

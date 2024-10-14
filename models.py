@@ -1,6 +1,7 @@
 import time
 
-from dataclasses import dataclass, asdict
+from typing import TypedDict
+from dataclasses import dataclass
 from enum import Enum
 
 class bcolors:
@@ -45,4 +46,23 @@ class JobsPageStatus(Enum):
     NO_JOBS_PHRASE_NOT_FOUND_BUT_NO_JOBS = 3
     SOME_JOB_FOUND = 4
 
+@dataclass
+class ScrapeError:
+    company_name: str
+    message: str
+    is_new_this_run: bool = False
 
+@dataclass
+class RunRecord:
+    existing_jobs: dict[str, list[str]]
+    errors: list[ScrapeError]
+
+    @staticmethod
+    def from_dict(run_record_dict):
+        return RunRecord(
+            existing_jobs=run_record_dict["existing_jobs"],
+            errors=[ScrapeError(**error) for error in run_record_dict["errors"]]
+        )
+        
+    def has_new_error(self) -> bool:
+        return any(error.is_new_this_run for error in self.errors)

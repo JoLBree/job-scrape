@@ -4,8 +4,12 @@ import json
 import datetime
 import boto3
 import argparse
-from selenium import webdriver
+from dataclasses import asdict
 from tempfile import mkdtemp
+
+from selenium import webdriver
+
+from models import *
 
 def lambda_handler(event, context, local=False):
     limit_company = event["limit_company"] if "limit_company" in event else None
@@ -46,31 +50,25 @@ def lambda_handler(event, context, local=False):
 
     sys.path.append(os.path.abspath("/tmp/job_scrape"))
 
-    existing_jobs_object = s3.Object(event["aws_config"]["bucket_name"], event["aws_config"]["existing_jobs_json"])
-    file_content = existing_jobs_object.get()['Body'].read().decode('utf-8')
-    existing_relevant_jobs = json.loads(file_content)
+    run_record_object = s3.Object(event["aws_config"]["bucket_name"], event["aws_config"]["run_record_json"])
+    file_content = run_record_object.get()['Body'].read().decode('utf-8')
+    run_record = RunRecord.from_dict(json.loads(file_content))
 
     # dynamic import so we can dynamically pull config file
-    from jobscrape import get_new_relevant_jobs, format_new_jobs_message
+    from jobscrape import get_new_relevant_jobs, format_new_jobs_message, format_errors_message
 
-    new_relevant_jobs, existing_relevant_jobs, verify_no_jobs, errors = get_new_relevant_jobs(
+    new_relevant_jobs, run_record, verify_no_jobs = get_new_relevant_jobs(
         driver,
-        existing_relevant_jobs,
+        run_record,
         limit_company,
         temp_term
     )
     return_message = {}
     
-
     sns = boto3.client('sns')
+
     if len(new_relevant_jobs) > 0:
         new_jobs_message = format_new_jobs_message(new_relevant_jobs)
-
-        if dont_replace_existing:
-            path, extension = os.path.splitext(event["aws_config"]["existing_jobs_json"])
-            existing_jobs_object = s3.Object(event["aws_config"]["bucket_name"], f"{path}_{str(datetime.datetime.now()).replace(" ", "_")}{extension}")
-        if not dont_write_existing:
-            existing_jobs_object.put(Body=json.dumps(existing_relevant_jobs, indent=4))
 
         response = sns.publish(
             TopicArn=event["aws_config"]["sns_topic_arn"],
@@ -80,42 +78,22 @@ def lambda_handler(event, context, local=False):
         print("New jobs:")
         print(new_jobs_message)
         return_message["new_jobs"] = new_jobs_message
-
-    errors_object = s3.Object(event["aws_config"]["bucket_name"], event["aws_config"]["errors_json"])
-    file_content = errors_object.get()['Body'].read().decode('utf-8')
-    existing_errors = json.loads(file_content)
-    existing_errors_company_names = {error["company_name"] for error in existing_errors}
     
-    if len(errors) > 0:
-        has_new_errors = False
+    errors_message = format_errors_message(run_record.errors)
+    print(errors_message)
+    return_message["errors"] = errors_message
+    if run_record.has_new_error():
+        response = sns.publish(
+            TopicArn=event["aws_config"]["sns_topic_arn"],
+            Message=errors_message,
+            Subject='New scrape error(s)',
+        )
 
-        new_existing_errors = []
-        for company_name, error in errors:
-            new_existing_errors.append({
-                "company_name": company_name,
-                "message": str(error),
-            })
-            foo = company_name not in existing_errors_company_names
-            print("company_name not in existing_errors_company_names", foo)
-            if company_name not in existing_errors_company_names:
-                has_new_errors = True
-
-        errors_message = f"All errors:\n{"\n".join([f"{company_name}: {error}" for company_name, error in errors])}"
-
-        if has_new_errors:
-            response = sns.publish(
-                TopicArn=event["aws_config"]["sns_topic_arn"],
-                Message=errors_message,
-                Subject='New scrape errors',
-            )
-
-        errors_object.put(Body=json.dumps(new_existing_errors, indent=4))
-        print(errors_message)
-        return_message["errors"] = errors_message
-
-    elif len(existing_errors_company_names) > 0:
-        errors_object.put(Body=json.dumps([], indent=4))
-
+    if dont_replace_existing:
+        path, extension = os.path.splitext(event["aws_config"]["run_record_json"])
+        run_record_object = s3.Object(event["aws_config"]["bucket_name"], f"{path}_{str(datetime.datetime.now()).replace(" ", "_")}{extension}")
+    if not dont_write_existing:
+        run_record_object.put(Body=json.dumps(asdict(run_record), indent=4))
 
     return {
         'statusCode': 200,
@@ -131,8 +109,7 @@ if __name__ == "__main__":
         "bucket_name": "",
         "config_file": "",
         "scrapers_file": "",
-        "existing_jobs_json": "",
-        "errors_json": "",
+        "run_record_json": "",
         "sns_topic_arn": "",
     }
     "limit_company": "",
