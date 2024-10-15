@@ -1,4 +1,4 @@
-name: Push to ECR
+name: Push to ECR and depoy lambda
 
 on:
   push:
@@ -17,8 +17,8 @@ jobs:
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
-                  aws-access-key-id: ${{ secrets.ACCESS_KEY }}
-                  aws-secret-access-key: ${{ secrets.SECRET_KEY }}
+                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ secrets.AWS_REGION }}
 
             - name: Login to Amazon ECR
@@ -30,6 +30,11 @@ jobs:
               run: |
                   # Build a docker container and push it to ECR
                   aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-                  docker build -t ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest .
-                  docker push ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
-                  echo "name=image::${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest" >> $GITHUB_OUTPUT
+                  docker build -t ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest .
+                  docker push ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
+                  echo "name=image::${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest" >> $GITHUB_OUTPUT
+
+            - name: Update AWS Lambda function
+              id: update-lambda
+              run: |
+                  aws lambda update-function-code --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} --image-uri ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
