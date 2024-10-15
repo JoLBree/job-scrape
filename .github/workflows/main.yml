@@ -34,8 +34,6 @@ jobs:
               with:
                 push: true
                 tags: ${{ secrets.ECR_REGISTRY }}/job-scrape:latest
-                cache-from: type=registry,ref=user/app:latest
-                cache-to: type=inline
 
             - name: Update AWS Lambda function
               id: update-lambda
