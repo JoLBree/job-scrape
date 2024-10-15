@@ -25,16 +25,8 @@ jobs:
               id: login-ecr
               uses: aws-actions/amazon-ecr-login@v2
 
-            - name: Build, tag, and push the image to Amazon ECR
-              id: build-image
-              run: |
-                  # Build a docker container and push it to ECR
-                  aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-                  docker build -t ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest .
-                  docker push ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
-                  echo "name=image::${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest" >> $GITHUB_OUTPUT
-
-            - name: Update AWS Lambda function
-              id: update-lambda
-              run: |
-                  aws lambda update-function-code --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} --image-uri ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
+            - name: Build Docker image
+              uses: docker/build-push-action@v6
+              with:
+                push: true
+                tags: ${{ secrets.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
