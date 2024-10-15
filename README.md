@@ -117,6 +117,9 @@ python3 jobscrape.py data/run_record.json --limit_company "example company name"
 Selenium documentation:
 https://www.selenium.dev/documentation/webdriver/elements/locators/
 
+`.find_element(...)` will error if no element is found.
+`.find_elements(...)` (note the plural) will happily keep going if no element(s) are found. If you have a loop through the elements after, it will just not loop through anything.
+
 If you get an error message, search it up.
 
 
