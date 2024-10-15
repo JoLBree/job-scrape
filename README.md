@@ -17,7 +17,7 @@ pip3 install -r requirements.txt
 Create initial files
 ```sh
 mkdir output
-echo "{}" >> output/existing_jobs.json
+echo "{\"existing_jobs\": {}, \"errors\": []}" >> data/run_record.json
 ```
 
 Usage
@@ -25,13 +25,13 @@ Usage
 source .venv/bin/activate
 
 # Search all companies in config
-python3 jobscrape.py output/existing_jobs.json
+python3 jobscrape.py data/run_record.json
 
 # Limit search to company name
-python3 jobscrape.py output/existing_jobs.json --limit_company "example company name"
+python3 jobscrape.py data/run_record.json --limit_company "example company name"
 
 # Run headless (i.e. without opening Chrome)
-python3 jobscrape.py output/existing_jobs.json --headless
+python3 jobscrape.py data/run_record.json --headless
 ```
 
 Configure `config.py` and write scrapers in `scrapers.py`.
@@ -51,7 +51,7 @@ The dynamic pulling is convoluted, but is concretely useful so that:
 `lambda_function.py` can be run locally to develop the AWS integrations. However, note that a local run of `lambda_function.py` will still pull the `config.py` and `scrapers.py` files from s3 and __will not__ use your local repo copies.
 
 Set up:
-- Create a bucket, upload `config.py` and `scrapers.py`, and initialize an empty `existing_jobs.json` (`{}`) and `errors.json` (`[]`)
+- Create a bucket, upload `config.py` and `scrapers.py`, and initialize `run_record.json` with `{"existing_jobs": {}, "errors": []}`
 - Build docker image and push to a private ECR repo
 - Deploy to a lambda with 2048 MB memory, 512 MB ephemeral storage, and a 10min timeout. Include some retries because the lambda run can be flaky (https://github.com/umihico/docker-selenium-lambda/issues/246). Grant permissions to s3 locations and SNS.
 - Configure SNS topic with email notifications
@@ -62,8 +62,7 @@ Set up:
             "bucket_name": "",
             "config_file": "", // path to config.py within bucket
             "scrapers_file": "", // path to scrapers.py within bucket
-            "existing_jobs_json": "", // path within bucket, initialized with `{}`
-            "errors_json": "", // path within bucket, initialized with `[]`
+            "run_record_json": "", // path within bucket, initialized with `{"existing_jobs": {}, "errors": []}`
             "sns_topic_arn": "",
         }
     }
@@ -103,16 +102,16 @@ JobPosting(
 
 ```sh
 # Sound notification when done
-python3 jobscrape.py output/existing_jobs.json && say "done"
+python3 jobscrape.py data/run_record.json && say "done"
 
 # Temporarily include an additional search term to verify that the scraper was successfully able to grab jobs on the page (even if none currently are relevant)
-python3 jobscrape.py output/existing_jobs.json --additional_search_term "director"
+python3 jobscrape.py data/run_record.json --additional_search_term "director"
 
 # Combine limiting to one company (that you are writing the scraper for) and including an additional temporary search term
-python3 jobscrape.py output/existing_jobs.json --limit_company "example company name" --additional_search_term "director"
+python3 jobscrape.py data/run_record.json --limit_company "example company name" --additional_search_term "director"
 
 # Combine with not overwriting the existing jobs file, so that you can keep running the same command to test if the scraper works. There should be a new file with the timestamp in outputs/ that includes the found new director job
-python3 jobscrape.py output/existing_jobs.json --limit_company "example company name" --additional_search_term "director" --dont_replace_existing
+python3 jobscrape.py data/run_record.json --limit_company "example company name" --additional_search_term "director" --dont_replace_existing
 ```
 
 Selenium documentation:
